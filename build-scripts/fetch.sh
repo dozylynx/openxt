@@ -23,7 +23,9 @@
 #
 
 GIT_ROOT_PATH=%GIT_ROOT_PATH%
+GIT_OPENXT_SUBMODULE_DIR="submodules-openxt"
 BUILD_USER="$(whoami)"
+GIT_LOCALHOST_IP=127.0.0.1
 
 # Fetch git mirrors
 for i in ${GIT_ROOT_PATH}/${BUILD_USER}/*.git; do
@@ -44,3 +46,46 @@ ps -p `cat /tmp/openxt_git.pid 2>/dev/null` >/dev/null 2>&1 || {
                --export-all
     chmod 666 /tmp/openxt_git.pid
 }
+
+# Ensure OpenXT submodules are fetched for all branches of OpenXT
+TMP_OPENXT_DIR="$(mktemp -d -t tmp-fetch.sh-openxt.XXXXX)"
+function cleanup {
+    rm -rf "${TMP_OPENXT_DIR}"
+}
+trap cleanup EXIT
+
+cd "$TMP_OPENXT_DIR"
+git clone --quiet git://${GIT_LOCALHOST_IP}/${BUILD_USER}/openxt.git
+cd openxt
+GITMODULES=
+BRANCHES="$(git branch --all | sed -n -e '/HEAD/d' -e '/^\s*remotes/p')"
+for BRANCH in ${BRANCHES} ; do
+    git checkout --quiet "$BRANCH"
+    if [ -r .gitmodules ] ; then
+        GITMODULES="${GITMODULES:+$GITMODULES }$(sed -ne 's/^\W*url = //p' <.gitmodules)"
+    fi
+done
+cd - >/dev/null
+cleanup
+trap - EXIT
+GITMODULES="$(for GITMODULE in $GITMODULES ; do echo $GITMODULE ; done | sort | uniq)"
+
+# GITMODULES lists all the remote URLs for submodule repositories required
+
+SUBMODULES_DIR="${GIT_ROOT_PATH}/${BUILD_USER}/${GIT_OPENXT_SUBMODULE_DIR}"
+mkdir -p "${SUBMODULES_DIR}"
+cd "${SUBMODULES_DIR}"
+for GITMODULE in ${GITMODULES} ; do
+    REPO_DIRNAME="$(echo $GITMODULE | sed 's,^.*/,,')"
+    echo -n "Fetching ${REPO_DIRNAME}: "
+    if [ -d "${SUBMODULES_DIR}/${REPO_DIRNAME}" ] ; then
+        # fetch
+        cd "${SUBMODULES_DIR}/${REPO_DIRNAME}"
+        git fetch --all > /dev/null 2>&1
+    else
+        git clone --quiet --mirror ${GITMODULE} ${REPO_DIRNAME}
+        cd "${REPO_DIRNAME}"
+    fi
+    git log -1 --pretty='tformat:%H'
+    cd - >/dev/null
+done | tee -a /tmp/git_heads_$BUILD_USER
