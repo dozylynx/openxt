@@ -30,6 +30,7 @@ BRANCH=%BRANCH%
 THREADS=%THREADS%
 SUBNET_PREFIX=%SUBNET_PREFIX%
 ALL_BUILDS_SUBDIR_NAME=%ALL_BUILDS_SUBDIR_NAME%
+GIT_OPENXT_SUBMODULE_DIR="submodules-openxt"
 
 HOST_IP=${SUBNET_PREFIX}.${IP_C}.1
 LOCAL_USER=`whoami`
@@ -168,6 +169,19 @@ if [ ! -d openxt ] ; then
     # Fetch the "upstream" layers
     # Initialise the submodules using .gitmodules
     git submodule init
+
+    # Use the local git mirror as source for submodule repos.
+    # This optimistic approach should be sufficient: assume the mirror
+    # is present and that it uses the expected directory name.
+    if [ -r .gitmodules ] ; then
+        GITMODULES="$(sed -ne 's/^\W*url = //p' <.gitmodules)"
+        for GITMODULE in ${GITMODULES} ; do
+            MODULE_DIRNAME="$(echo "$GITMODULE" | sed 's,.*/,,')"
+            MIRROR_URL="git://${HOST_IP}/${BUILD_USER}/${GIT_OPENXT_SUBMODULE_DIR}/${MODULE_DIRNAME}"
+            sed -i "s|${GITMODULE}|${MIRROR_URL}|g" .git/config
+        done
+    fi
+
     # Clone the submodules, using their saved HEAD
     git submodule update --checkout
     # Update the submodules that follow a branch (update != none)
