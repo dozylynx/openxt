@@ -105,6 +105,7 @@ done
 
 CONTAINER_USER=%CONTAINER_USER%
 SUBNET_PREFIX=%SUBNET_PREFIX%
+GIT_ROOT_PATH=%GIT_ROOT_PATH%
 BUILD_USER="$(whoami)"
 BUILD_USER_ID="$(id -u ${BUILD_USER})"
 BUILD_USER_HOME="$(eval echo ~${BUILD_USER})"
@@ -155,6 +156,87 @@ echo "Done"
 echo "Running build: ${BUILD_DIR}"
 mkdir -p "${BUILD_DIR_PATH}/raw"
 
+prep_layers() {
+    BRANCH=$1
+    BUILD_ID=$2
+
+    WORKDIR="$(pwd)"
+    GIT_LOCALHOST_IP=127.0.0.1
+
+    # Populate a build-specific branch in the git mirror openxt repo
+    # with the layer repositories and configuration for this build.
+
+    TMP_OPENXT_DIR="$(mktemp -d -t tmp-build.sh-openxt.XXXXX)"
+    function cleanup {
+        rm -rf "${TMP_OPENXT_DIR}"
+    }
+    trap cleanup EXIT
+
+    git clone --quiet \
+        "git://${GIT_LOCALHOST_IP}/${BUILD_USER}/openxt.git" "${TMP_OPENXT_DIR}"/openxt
+    cd "${TMP_OPENXT_DIR}"/openxt
+
+    # If the build-specific branch is already present, we're done.
+    if git rev-parse --verify "${BRANCH}--${BUILD_ID}" ; then
+        cleanup
+        trap - EXIT
+        return
+    fi
+    git checkout "${BRANCH}"
+    git checkout -b "${BRANCH}--${BUILD_ID}"
+
+    # Add the git repository of each layer as a git submodule,
+    # and add a corresponding entry in bblayers.conf
+    ( set -e ; . "${WORKDIR}"/*.layer ; for layer in $openxt_layers; do
+        name_var="openxt_layer_${layer}_name"
+        repo_var="openxt_layer_${layer}_repository"
+        rev_var="openxt_layer_${layer}_revision"
+
+        # If no revision is specified, default to $BRANCH
+        [ ! -z "${!rev_var}" ] || rev_var=BRANCH
+
+        git clone --quiet "${!repo_var}" "build/repos/${!name_var}"
+        cd "build/repos/${!name_var}"
+        git checkout "${!rev_var}"
+
+        # If the specified revision is a branch, track it; otherwise
+        # for specified commits, disable updates to ensure that revision is used.
+
+        if git show-ref --quiet --verify -- "refs/remotes/origin/${!rev_var}" ; then
+            cd - >/dev/null
+            git submodule add -b "${!rev_var}" "${!repo_var}" "build/repos/${!name_var}"
+        else
+            cd - >/dev/null
+            git submodule add "${!repo_var}" "build/repos/${!name_var}"
+            git add "build/repos/${!name_var}"
+            sed -i 's/^\[submodule "build\/repos\/'"${!name_var}"'"\]$/&\n\tupdate = none/' .gitmodules
+            git add .gitmodules
+        fi
+
+        echo "BBLAYERS =+ \"\${TOPDIR}/repos/${!name_var}\"" >> build/conf/bblayers.conf
+    done )
+    git add build/conf/bblayers.conf
+
+    # Add the layer images to be built
+    ( set -e ; . "${WORKDIR}"/*.layer ; for layer in $openxt_layers; do
+        images_var="openxt_layer_${layer}_images[@]"
+        for image in "${!images_var}"; do
+            machine=`echo $image | awk '{print $1}'`
+            step=`echo $image | awk '{print $2}'`
+            format=`echo $image | awk '{print $3}'`
+            echo "$machine $step $format" >> build/conf/images.conf
+        done
+    done )
+    git add build/conf/images.conf
+
+    git commit -m "OpenXT build ${BUILD_ID}" --author='OpenXT Build <openxt@build>'
+    git push file://${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git "${BRANCH}--${BUILD_ID}"
+
+    cd - >/dev/null
+    cleanup
+    trap - EXIT
+}
+
 build_container() {
     NUMBER=$1           # 01
     NAME=$2             # oe
@@ -168,14 +250,8 @@ build_container() {
         return
     fi
 
-    # Build
-    # Note: we cat all the layers and the build script to the ssh command
-    #   Another approach could be to `source *.layer` here and send them to the
-    #   container using the ssh option "SendEnv".
-    #   The way we do it here, the shell will for example turn tabulations into
-    #   completion requests, which is not ideal...
-    cat *.layer $NAME/build.sh | \
-        sed -e "s|\%BUILD_USER\%|${BUILD_USER}|" \
+    sed <$NAME/build.sh \
+            -e "s|\%BUILD_USER\%|${BUILD_USER}|" \
             -e "s|\%BUILD_DIR\%|${BUILD_DIR}|" \
             -e "s|\%SUBNET_PREFIX\%|${SUBNET_PREFIX}|" \
             -e "s|\%IP_C\%|${IP_C}|" \
@@ -375,6 +451,7 @@ EOF
 
 }
 
+[ -z $NO_OE ]      && prep_layers "${BRANCH}" "${BUILD_ID}"
 [ -z $NO_OE ]      && build_container "01" "oe"
 [ -z $NO_DEBIAN ]  && build_container "02" "debian"
 [ -z $NO_CENTOS ]  && build_container "03" "centos"
