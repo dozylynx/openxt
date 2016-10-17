@@ -22,3 +22,6 @@
 	path = build/repos/meta-intel
 	url = git://git.yoctoproject.org/meta-intel
 	branch = jethro
+[submodule "build-scripts/git-repo"]
+	path = build-scripts/git-repo
+	url = https://gerrit.googlesource.com/git-repo
