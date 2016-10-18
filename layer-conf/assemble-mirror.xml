@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <remote name="origin" fetch=".."/>
+
+    <!-- The openxt remote is configured via a local_manifest
+         pointing to the local git mirror.
+      -->
+    <remote name="openembedded" fetch="git://git.openembedded.org"/>
+    <remote name="yoctoproject" fetch="git://git.yoctoproject.org"/>
+
+    <default revision="master" remote="origin" sync-j="4"/>
+
+    <project name="bitbake.git"
+             remote="openembedded" path="build/repos/bitbake"
+             />
+
+    <project name="meta-intel"
+             remote="yoctoproject" path="build/repos/meta-intel"
+             />
+
+    <project name="meta-java"
+             remote="yoctoproject" path="build/repos/meta-java"
+             />
+
+    <project name="meta-openembedded"
+             remote="openembedded" path="build/repos/meta-openembedded"
+             />
+
+    <project name="meta-selinux"
+             remote="yoctoproject" path="build/repos/meta-selinux"
+             />
+
+    <project name="openembedded-core"
+             remote="openembedded" path="build/repos/openembedded-core"
+             />
+
+    <project name="xenclient-oe.git"
+             remote="openxt" path="build/repos/xenclient-oe"
+             />
+</manifest>

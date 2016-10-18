@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <remote name="openxt" fetch="git://%REPO_IP%/%BUILD_USER%"/>
+    <remote name="openembedded" fetch="git://%REPO_IP%/%BUILD_USER%/repo"/>
+    <remote name="yoctoproject" fetch="git://%REPO_IP%/%BUILD_USER%/repo"/>
+</manifest>

@@ -162,10 +162,9 @@ cd $BUILD_DIR
 
 if [ ! -d openxt ] ; then
     # Clone main repos
-    git clone -b $BRANCH git://${HOST_IP}/${BUILD_USER}/openxt.git
+    git clone -b "${BRANCH}--${BUILD_ID}" "git://${HOST_IP}/${BUILD_USER}/openxt.git"
     cd openxt
 
-    # Fetch the "upstream" layers
     # Initialise the submodules using .gitmodules
     git submodule init
     # Clone the submodules, using their saved HEAD
@@ -173,21 +172,20 @@ if [ ! -d openxt ] ; then
     # Update the submodules that follow a branch (update != none)
     git submodule update --remote
 
-    # Clone OpenXT layers
-    for layer in $openxt_layers; do
-        name_var="openxt_layer_${layer}_name"
-        repo_var="openxt_layer_${layer}_repository"
-        rev_var="openxt_layer_${layer}_revision"
-        git clone ${!repo_var} build/repos/${!name_var}
-        cd build/repos/${!name_var}
-        if [ -z ${!rev_var} ]; then
-            git checkout $BRANCH
-        else
-            git checkout ${!rev_var}
-        fi
-        cd - >/dev/null
-        echo "BBLAYERS =+ \"\${TOPDIR}/repos/${!name_var}\"" >> build/conf/bblayers.conf
-    done
+    # Initialize the 'repo' tool with a local manifest pointed at the git mirror
+    # and use it to obtain layer repositories
+    mkdir -p .repo/local_manifests
+    sed <layer-conf/git_mirror.xml.in >.repo/local_manifests/git_mirror.xml \
+        -e 's|%REPO_IP%|'"${HOST_IP}"'|g'
+        -e 's|%BUILD_USER%|'"${BUILD_USER}"'|g'
+
+    git-repo/repo init -u "git://${HOST_IP}/${BUILD_USER}/openxt.git" \
+                       -b "${BRANCH}--${BUILD_ID}"
+    git-repo/repo sync -c
+
+    # Process the repositories obtained from repo to shift them from
+    # detached HEAD state onto the preferred branch
+    # TODO: git-repo/repo start ...
 
     # Configure OpenXT
     setupoe
@@ -200,17 +198,12 @@ configure_threads
 # Build
 mkdir -p build
 cd build
-for layer in $openxt_layers; do
-    echo "Building layer ${layer}..."
-    images_var="openxt_layer_${layer}_images[@]"
-    for image in "${!images_var}"; do
-        echo $image
-        machine=`echo $image | awk '{print $1}'`
-        step=`echo $image | awk '{print $2}'`
-        format=`echo $image | awk '{print $3}'`
-        echo "Building $step for $machine in $format"
-        build_image $machine $step $format
-    done
+cat conf/images.conf | while read image; do
+    machine=`echo $image | awk '{print $1}'`
+    step=`echo $image | awk '{print $2}'`
+    format=`echo $image | awk '{print $3}'`
+    echo "Building $step for $machine in $format"
+    build_image $machine $step $format
 done
 
 collect_packages

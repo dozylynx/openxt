@@ -285,10 +285,41 @@ cp -f *.layer "${BUILD_USER_HOME}/"
 sed -i "s|\%CONTAINER_USER\%|${CONTAINER_USER}|" ${BUILD_USER_HOME}/build.sh
 sed -i "s|\%SUBNET_PREFIX\%|${SUBNET_PREFIX}|" ${BUILD_USER_HOME}/build.sh
 sed -i "s|\%GIT_ROOT_PATH\%|${GIT_ROOT_PATH}|" ${BUILD_USER_HOME}/fetch.sh
+sed -i "s|\%GIT_ROOT_PATH\%|${GIT_ROOT_PATH}|" ${BUILD_USER_HOME}/build.sh
 chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/build.sh
 chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/fetch.sh
 chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/version
 chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/*.layer
+
+# Download the git-repo tool via git submodule.
+# Install it in the home directory of the user.
+if [ ! -e "${BUILD_USER_HOME}/repo" ] ; then
+    if [ ! -e "git-repo/repo" ] ; then
+        git submodule init
+        git submodule update --checkout
+        git submodule update --remote
+    fi
+    cp -f git-repo/repo "${BUILD_USER_HOME}/"
+    chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/repo
+fi
+
+# Mirror the git-repo repository because the repo tool accesses it.
+if [ ! -d "${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt/git-repo.git" ] ; then
+    echo "Mirroring the repo tool repository"
+    cd git-repo
+    REPO_URL="$(git config --get remote.origin.url)"
+    cd - >/dev/null
+    mkdir -p "${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt"
+    cd "${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt"
+    git clone --quiet --mirror "${REPO_URL}"
+    echo "Done"
+    cd - > /dev/null
+    chown -R ${BUILD_USER}:${BUILD_USER} \
+             ${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt/git-repo.git
+fi
+
+# Change the default REPO_URL in the repo tool to point at the mirror.
+sed -i "s|REPO_URL\s*=\s*'.*'|REPO_URL = 'git://${SUBNET_PREFIX}.${IP_C}.1/${BUILD_USER}/submodules/openxt/git-repo'|" "${BUILD_USER_HOME}/repo"
 
 LXC_PATH=`lxc-config lxc.lxcpath`
 

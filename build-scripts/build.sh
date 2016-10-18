@@ -47,6 +47,10 @@ NO_WINDOWS=
 
 THREADS=
 
+# OBJECTIVE specifies what is to be built. This must match one of the
+# available configurations.
+OBJECTIVE="graphical-client"
+
 # -- End of script configuration settings.
 
 usage() {
@@ -105,6 +109,7 @@ done
 
 CONTAINER_USER=%CONTAINER_USER%
 SUBNET_PREFIX=%SUBNET_PREFIX%
+GIT_ROOT_PATH=%GIT_ROOT_PATH%
 BUILD_USER="$(whoami)"
 BUILD_USER_ID="$(id -u ${BUILD_USER})"
 BUILD_USER_HOME="$(eval echo ~${BUILD_USER})"
@@ -160,6 +165,49 @@ echo "Done"
 echo "Running build: ${BUILD_DIR}"
 mkdir -p "${BUILD_DIR_PATH}/raw"
 
+prep_layers() {
+    BRANCH="$1"
+    BUILD_ID="$2"
+    OBJECTIVE="$3"
+    GIT_LOCALHOST_IP=127.0.0.1
+
+    # Populate a build-specific branch in the git mirror openxt repo
+    # with the layer repositories and configuration for this build.
+
+    TMP_OPENXT_DIR="$(mktemp -d -t tmp-build.sh-openxt.XXXXX)"
+    function cleanup {
+        rm -rf "${TMP_OPENXT_DIR}"
+    }
+    trap cleanup EXIT
+
+    git clone --quiet \
+        "git://${GIT_LOCALHOST_IP}/${BUILD_USER}/openxt.git" "${TMP_OPENXT_DIR}"/openxt
+    cd "${TMP_OPENXT_DIR}"/openxt
+
+    if git rev-parse --verify "${BRANCH}--${BUILD_ID}" ; then
+        cd - >/dev/null
+        cleanup
+        trap - EXIT
+        return
+    fi
+    git checkout "${BRANCH}"
+    git checkout -b "${BRANCH}--${BUILD_ID}"
+
+    cp -f "layer-conf/${OBJECTIVE}.xml" default.xml
+    git add default.xml
+    cp -f "layer-conf/${OBJECTIVE}.bblayers.conf" build/conf/bblayers.conf
+    git add build/conf/bblayers.conf
+    cp -f "layer-conf/${OBJECTIVE}.images.conf" build/conf/images.conf
+    git add build/conf/images.conf
+
+    git commit -m "OpenXT build ${BUILD_ID}" --author='OpenXT Build <openxt@build>'
+    git push file://${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git "${BRANCH}--${BUILD_ID}"
+
+    cd - >/dev/null
+    cleanup
+    trap - EXIT
+}
+
 build_container() {
     NUMBER=$1           # 01
     NAME=$2             # oe
@@ -174,13 +222,8 @@ build_container() {
     fi
 
     # Build
-    # Note: we cat all the layers and the build script to the ssh command
-    #   Another approach could be to `source *.layer` here and send them to the
-    #   container using the ssh option "SendEnv".
-    #   The way we do it here, the shell will for example turn tabulations into
-    #   completion requests, which is not ideal...
-    cat *.layer $NAME/build.sh | \
-        sed -e "s|\%BUILD_USER\%|${BUILD_USER}|" \
+    sed <$NAME/build.sh \
+            -e "s|\%BUILD_USER\%|${BUILD_USER}|" \
             -e "s|\%BUILD_DIR\%|${BUILD_DIR}|" \
             -e "s|\%SUBNET_PREFIX\%|${SUBNET_PREFIX}|" \
             -e "s|\%IP_C\%|${IP_C}|" \
@@ -380,6 +423,7 @@ EOF
 
 }
 
+[ -z $NO_OE ]      && prep_layers "${BRANCH}" "${BUILD_ID}" "${OBJECTIVE}"
 [ -z $NO_OE ]      && build_container "01" "oe"
 [ -z $NO_DEBIAN ]  && build_container "02" "debian"
 [ -z $NO_CENTOS ]  && build_container "03" "centos"

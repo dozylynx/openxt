@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <remote name="origin" fetch=".."/>
+
+    <default revision="master" remote="origin" sync-j="4"/>
+
+    <project name="bitbake.git"
+             remote="openembedded" path="build/repos/bitbake"
+             revision="0e9d8d63ddb35d181d4e470585d1e4a4c646cd00"/>
+
+    <project name="meta-intel"
+             remote="yoctoproject" path="build/repos/meta-intel"
+             revision="jethro"/>
+
+    <project name="meta-java"
+             remote="yoctoproject" path="build/repos/meta-java"
+             revision="a73939323984fca1e919d3408d3301ccdbceac9c"/>
+
+    <project name="meta-openembedded"
+             remote="openembedded" path="build/repos/meta-openembedded"
+             revision="jethro"/>
+
+    <project name="meta-selinux"
+             remote="yoctoproject" path="build/repos/meta-selinux"
+             revision="jethro"/>
+
+    <project name="openembedded-core"
+             remote="openembedded" path="build/repos/openembedded-core"
+             revision="jethro"/>
+
+    <project name="xenclient-oe.git"
+             remote="openxt" path="build/repos/xenclient-oe"
+             revision="master"/>
+</manifest>

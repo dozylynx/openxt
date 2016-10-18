@@ -4,8 +4,10 @@
 # Software license: see accompanying LICENSE file.
 #
 # Copyright (c) 2016 Assured Information Security, Inc.
+# Copyright (c) 2016 BAE Systems
 #
 # Contributions by Jean-Edouard Lejosne
+# Contributions by Christopher Clark
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,8 +26,9 @@
 
 GIT_ROOT_PATH=%GIT_ROOT_PATH%
 BUILD_USER="$(whoami)"
+GIT_LOCALHOST_IP=127.0.0.1
 
-# Fetch git mirrors
+# Fetch git mirrors of OpenXT repositories
 for i in ${GIT_ROOT_PATH}/${BUILD_USER}/*.git; do
     echo -n "Fetching `basename $i`: "
     cd $i
@@ -33,6 +36,58 @@ for i in ${GIT_ROOT_PATH}/${BUILD_USER}/*.git; do
     git log -1 --pretty='tformat:%H'
     cd - > /dev/null
 done | tee /tmp/git_heads_$BUILD_USER
+
+# Fetch git mirrors of submodules of openxt.git
+mirror_openxt_submodules() {
+    SUBMODULES=
+    cd "${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git"
+    BRANCHES="$(git branch --all)"
+    for BRANCH in ${BRANCHES} ; do
+        SUBMODULES="${SUBMODULES:+$SUBMODULES }$(git show "${BRANCH}":.gitmodules 2>/dev/null | sed -ne 's/^\W*url = //p')"
+    done
+    cd - >/dev/null
+    SUBMODULES="$(for SUBMODULE in $SUBMODULES ; do echo $SUBMODULE ; done | sort | uniq)"
+
+    SUBMODULES_DIR="${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt"
+    mkdir -p "${SUBMODULES_DIR}"
+    for SUBMODULE in ${SUBMODULES} ; do
+        REPO_DIRNAME="$(echo $SUBMODULE | sed 's,^.*/,,')"
+        echo -n "Fetching ${REPO_DIRNAME}: "
+        if [ -d "${SUBMODULES_DIR}/${REPO_DIRNAME}" ] ; then
+            cd "${SUBMODULES_DIR}/${REPO_DIRNAME}"
+            git fetch --all > /dev/null 2>&1
+        else
+            git clone --quiet --mirror "${SUBMODULE}" "${REPO_DIRNAME}"
+            cd "${SUBMODULES_DIR}/${REPO_DIRNAME}"
+        fi
+        git log -1 --pretty='tformat:%H'
+        cd - >/dev/null
+    done | tee -a /tmp/git_heads_$BUILD_USER
+}
+mirror_openxt_submodules
+
+# Populate repo mirror
+mirror_repo_repositories() {
+    REPO_MIRROR_DIR="${GIT_ROOT_PATH}/${BUILD_USER}/repo"
+    mkdir -p "${REPO_MIRROR_DIR}"
+    cd "${REPO_MIRROR_DIR}"
+    if [ ! -d .repo ] ; then
+        # Use the local git mirror for the openxt remote
+        mkdir -p "${REPO_MIRROR_DIR}/.repo/local_manifests"
+        cat >.repo/local_manifests/git_mirror.xml <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <remote name="openxt" fetch="git://${GIT_LOCALHOST_IP}/${BUILD_USER}"/>
+</manifest>
+EOF
+        ~/repo init -u "git://${GIT_LOCALHOST_IP}/${BUILD_USER}/openxt.git" \
+                    -m layer-conf/assemble-mirror.xml \
+                    --mirror
+    fi
+    ~/repo sync
+    cd - >/dev/null
+}
+mirror_repo_repositories
 
 # Start the git service if needed
 ps -p `cat /tmp/openxt_git.pid 2>/dev/null` >/dev/null 2>&1 || {
