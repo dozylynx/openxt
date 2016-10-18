@@ -28,6 +28,28 @@ GIT_ROOT_PATH=%GIT_ROOT_PATH%
 BUILD_USER="$(whoami)"
 GIT_LOCALHOST_IP=127.0.0.1
 
+usage() {
+    cat >&2 <<EOF
+usage: $0 [-h help] [-b branch]
+  -h: Help
+  -b: Branch to fetch build dependencies for
+EOF
+    exit $1
+}
+
+BRANCH=
+
+while getopts "hb:" opt; do
+    case $opt in
+        h) usage 0
+            ;;
+        b) BRANCH=${OPTARG}
+            ;;
+        \?) usage 1
+            ;;
+    esac
+done
+
 # Fetch git mirrors of OpenXT repositories
 for i in ${GIT_ROOT_PATH}/${BUILD_USER}/*.git; do
     echo -n "Fetching `basename $i`: "
@@ -41,9 +63,10 @@ done | tee /tmp/git_heads_$BUILD_USER
 mirror_openxt_submodules() {
     SUBMODULES=
     cd "${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git"
-    BRANCHES="$(git branch --all)"
-    for BRANCH in ${BRANCHES} ; do
-        SUBMODULES="${SUBMODULES:+$SUBMODULES }$(git show "${BRANCH}":.gitmodules 2>/dev/null | sed -ne 's/^\W*url = //p')"
+    BRANCHES="${BRANCH}"
+    [ ! -z "${BRANCHES}" ] || BRANCHES="$(git branch --all)"
+    for BR in ${BRANCHES} ; do
+        SUBMODULES="${SUBMODULES:+$SUBMODULES }$(git show "${BR}":.gitmodules 2>/dev/null | sed -ne 's/^\W*url = //p')"
     done
     cd - >/dev/null
     SUBMODULES="$(for SUBMODULE in $SUBMODULES ; do echo $SUBMODULE ; done | sort | uniq)"
@@ -82,6 +105,7 @@ mirror_repo_repositories() {
 EOF
         ~/repo init -u "git://${GIT_LOCALHOST_IP}/${BUILD_USER}/openxt.git" \
                     -m layer-conf/assemble-mirror.xml \
+                    ${BRANCH:+-b} ${BRANCH} \
                     --mirror
     fi
     ~/repo sync

@@ -159,7 +159,7 @@ if ! mkdir -p "${BUILD_DIR_PATH}" ; then
 fi
 
 echo "Fetching git mirrors..."
-./fetch.sh > "${BUILD_DIR_PATH}/git_heads"
+./fetch.sh -b "${BRANCH}" > "${BUILD_DIR_PATH}/git_heads"
 echo "Done"
 
 echo "Running build: ${BUILD_DIR}"
