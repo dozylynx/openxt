@@ -162,32 +162,50 @@ cd $BUILD_DIR
 
 if [ ! -d openxt ] ; then
     # Clone main repos
-    git clone -b $BRANCH git://${HOST_IP}/${BUILD_USER}/openxt.git
+    BUILD_BR="oxt-build--${BRANCH:-master}--${BUILD_ID}"
+    git clone -b "${BUILD_BR}" "git://${HOST_IP}/${BUILD_USER}/openxt.git"
     cd openxt
 
-    # Fetch the "upstream" layers
     # Initialise the submodules using .gitmodules
     git submodule init
+
+    # Use the local git mirror as source for submodule repos
+    GIT_OPENXT_SUBMODULE_DIR="submodules/openxt"
+    if [ -r .gitmodules ] ; then
+        GITMODULES="$(sed -ne 's/^\W*url = //p' <.gitmodules)"
+        for GITMODULE in ${GITMODULES} ; do
+            MODULE_DIRNAME="$(echo "$GITMODULE" | sed 's,.*/,,')"
+            MIRROR_URL="git://${HOST_IP}/${BUILD_USER}/${GIT_OPENXT_SUBMODULE_DIR}/${MODULE_DIRNAME}"
+            sed -i "s|${GITMODULE}|${MIRROR_URL}|g" .git/config
+        done
+    fi
+
     # Clone the submodules, using their saved HEAD
     git submodule update --checkout
     # Update the submodules that follow a branch (update != none)
     git submodule update --remote
 
-    # Clone OpenXT layers
-    for layer in $openxt_layers; do
-        name_var="openxt_layer_${layer}_name"
-        repo_var="openxt_layer_${layer}_repository"
-        rev_var="openxt_layer_${layer}_revision"
-        git clone ${!repo_var} build/repos/${!name_var}
-        cd build/repos/${!name_var}
-        if [ -z ${!rev_var} ]; then
-            git checkout $BRANCH
-        else
-            git checkout ${!rev_var}
-        fi
-        cd - >/dev/null
-        echo "BBLAYERS =+ \"\${TOPDIR}/repos/${!name_var}\"" >> build/conf/bblayers.conf
-    done
+    # If the repo tool manifest files are present indicating that it is in use,
+    # initialize it with a local manifest pointed at the git mirror
+    if [ -e remotes.xml ] ; then
+        mkdir -p .repo/local_manifests
+
+        sed -e 's|\(<remote\sname="[^"]*"\sfetch="\)[^"]*\(".*\)|\1git://'"${HOST_IP}/${BUILD_USER}/repo"'\2|' \
+            -e 's|\(<remote\sname="openxt"\sfetch="\)[^"]*\(".*\)|\1git://'"${HOST_IP}/${BUILD_USER}"'\2|' \
+            <remotes.xml \
+            >.repo/local_manifests/remotes.xml
+
+        git config --get user.name >/dev/null ||
+            git config --global user.name "OpenXT Build"
+        git config --get user.email >/dev/null ||
+            git config --global user.email "build@openxt"
+
+        # Use repo to obtain the required layer repositories
+        build-scripts/git-repo/repo init \
+            -u "git://${HOST_IP}/${BUILD_USER}/openxt.git" \
+            -b "${BUILD_BR}"
+        build-scripts/git-repo/repo sync -c
+    fi
 
     # Configure OpenXT
     setupoe
@@ -200,18 +218,13 @@ configure_threads
 # Build
 mkdir -p build
 cd build
-for layer in $openxt_layers; do
-    echo "Building layer ${layer}..."
-    images_var="openxt_layer_${layer}_images[@]"
-    for image in "${!images_var}"; do
-        echo $image
-        machine=`echo $image | awk '{print $1}'`
-        step=`echo $image | awk '{print $2}'`
-        format=`echo $image | awk '{print $3}'`
-        echo "Building $step for $machine in $format"
-        build_image $machine $step $format
-    done
-done
+while read image; do
+    machine=`echo "${image}" | awk '{print $1}'`
+    step=`echo "${image}" | awk '{print $2}'`
+    format=`echo "${image}" | awk '{print $3}'`
+    echo "Building $step for $machine in $format"
+    build_image "$machine" "$step" "$format"
+done <conf/images.conf
 
 collect_packages
 collect_logs

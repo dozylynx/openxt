@@ -47,6 +47,10 @@ NO_WINDOWS=
 
 THREADS=
 
+# OBJECTIVE specifies what is to be built. This must match one of the
+# available configurations -- see the layer-conf directory.
+OBJECTIVE="graphical-client"
+
 # -- End of script configuration settings.
 
 usage() {
@@ -179,11 +183,79 @@ if ! mkdir -p "${BUILD_DIR_PATH}" ; then
 fi
 
 echo "Fetching git mirrors..."
-./fetch.sh > "${BUILD_DIR_PATH}/git_heads"
+./fetch.sh -b "${BRANCH}" -o "${OBJECTIVE}" > "${BUILD_DIR_PATH}/git_heads"
 echo "Done"
 
 echo "Running build: ${BUILD_DIR}"
 mkdir -p "${BUILD_DIR_PATH}/raw"
+
+prep_layers() {
+    BRANCH="$1"
+    BUILD_ID="$2"
+    OBJECTIVE="$3"
+    GIT_LOCALHOST_IP=127.0.0.1
+
+    # Ensure that a build-specific branch is present in the openxt repository
+    # in the git mirror and that it contains the layers manifest and configs.
+
+    cd "${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git"
+    BUILD_BR="oxt-build--${BRANCH:-master}--${BUILD_ID}"
+    LAYER_FILES="default.xml remotes.xml build/conf/bblayers.conf build/conf/images.conf"
+    FILES_TO_ADD=
+    for FILE in ${LAYER_FILES} ; do
+        if ! git show "${BUILD_BR}:${FILE}" 1>/dev/null 2>/dev/null ; then
+            FILES_TO_ADD="${FILES_TO_ADD:+$FILES_TO_ADD }${FILE}"
+        fi
+    done
+    cd - >/dev/null
+    [ ! -z "${FILES_TO_ADD}" ] || return
+
+    TMP_OPENXT_DIR="$(mktemp -d -t tmp-build.sh-openxt.XXXXX)"
+    function cleanup {
+        rm -rf "${TMP_OPENXT_DIR}"
+    }
+    trap cleanup EXIT
+
+    git clone --quiet \
+        "git://${GIT_LOCALHOST_IP}/${BUILD_USER}/openxt.git" "${TMP_OPENXT_DIR}"/openxt
+    cd "${TMP_OPENXT_DIR}"/openxt
+
+    PUSH=
+    if ! git rev-parse --verify "${BUILD_BR}" ; then
+        git checkout "${BRANCH}"
+        git checkout -b "${BUILD_BR}"
+        PUSH=yes
+    else
+        git checkout "${BUILD_BR}"
+    fi
+
+    if git show "${BRANCH}:layer-conf" 1>/dev/null 2>/dev/null ; then
+        if [ ! -e default.xml ] ; then
+            cp -f "layer-conf/${OBJECTIVE}.xml" default.xml
+            git add default.xml
+        fi
+        if [ ! -e remotes.xml ] ; then
+            cp -f "layer-conf/${OBJECTIVE}.remotes.xml" remotes.xml
+            git add remotes.xml
+        fi
+        if [ ! -e build/conf/bblayers.conf ] ; then
+            cp -f "layer-conf/${OBJECTIVE}.bblayers.conf" build/conf/bblayers.conf
+            git add build/conf/bblayers.conf
+        fi
+        if [ ! -e build/conf/images.conf ] ; then
+            cp -f "layer-conf/${OBJECTIVE}.images.conf" build/conf/images.conf
+            git add build/conf/images.conf
+        fi
+        git commit -m "OpenXT build ${BUILD_ID}" --author='OpenXT Build <openxt@build>'
+        PUSH=yes
+    fi
+    [ -z "${PUSH}" ] || \
+        git push file://${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git "${BUILD_BR}"
+
+    cd - >/dev/null
+    cleanup
+    trap - EXIT
+}
 
 build_container() {
     NUMBER=$1           # 01
@@ -199,13 +271,8 @@ build_container() {
     fi
 
     # Build
-    # Note: we cat all the layers and the build script to the ssh command
-    #   Another approach could be to `source *.layer` here and send them to the
-    #   container using the ssh option "SendEnv".
-    #   The way we do it here, the shell will for example turn tabulations into
-    #   completion requests, which is not ideal...
-    cat *.layer $NAME/build.sh | \
-        sed -e "s|\%BUILD_USER\%|${BUILD_USER}|" \
+    sed <$NAME/build.sh \
+            -e "s|\%BUILD_USER\%|${BUILD_USER}|" \
             -e "s|\%BUILD_DIR\%|${BUILD_DIR}|" \
             -e "s|\%SUBNET_PREFIX\%|${SUBNET_PREFIX}|" \
             -e "s|\%IP_C\%|${IP_C}|" \
@@ -405,6 +472,7 @@ EOF
 
 }
 
+[ -z $NO_OE ]      && prep_layers "${BRANCH}" "${BUILD_ID}" "${OBJECTIVE}"
 [ -z $NO_OE ]      && build_container "01" "oe"
 [ -z $NO_DEBIAN ]  && build_container "02" "debian"
 [ -z $NO_CENTOS ]  && build_container "03" "centos"

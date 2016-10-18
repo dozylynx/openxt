@@ -4,8 +4,10 @@
 # Software license: see accompanying LICENSE file.
 #
 # Copyright (c) 2016 Assured Information Security, Inc.
+# Copyright (c) 2016 BAE Systems
 #
 # Contributions by Jean-Edouard Lejosne
+# Contributions by Christopher Clark
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,8 +26,35 @@
 
 GIT_ROOT_PATH=%GIT_ROOT_PATH%
 BUILD_USER="$(whoami)"
+GIT_LOCALHOST_IP=127.0.0.1
 
-# Fetch git mirrors
+usage() {
+    cat >&2 <<EOF
+usage: $0 [-h help] [-b branch] [-o objective]
+  -h: Help
+  -b: Branch to fetch build dependencies for
+  -o: Build objective to fetch build dependencies for
+EOF
+    exit $1
+}
+
+BRANCH=
+OBJECTIVE=
+
+while getopts "hb:o:" opt; do
+    case $opt in
+        h) usage 0
+            ;;
+        b) BRANCH="${OPTARG}"
+            ;;
+        o) OBJECTIVE="${OPTARG}"
+            ;;
+        \?) usage 1
+            ;;
+    esac
+done
+
+# Fetch git mirrors of OpenXT repositories
 for i in ${GIT_ROOT_PATH}/${BUILD_USER}/*.git; do
     echo -n "Fetching `basename $i`: "
     cd $i
@@ -33,6 +62,38 @@ for i in ${GIT_ROOT_PATH}/${BUILD_USER}/*.git; do
     git log -1 --pretty='tformat:%H'
     cd - > /dev/null
 done | tee /tmp/git_heads_$BUILD_USER
+
+# Fetch git mirrors of submodules of openxt.git
+mirror_openxt_submodules() {
+    SUBMODULES=
+    cd "${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git"
+    BRANCHES="${BRANCH}"
+    [ ! -z "${BRANCHES}" ] || BRANCHES="$(git branch --all)"
+    for BR in ${BRANCHES} ; do
+        SUBMODULES="${SUBMODULES:+$SUBMODULES }$(git show "${BR}":.gitmodules 2>/dev/null | sed -ne 's/^\W*url = //p')"
+    done
+    cd - >/dev/null
+    SUBMODULES="$(for SUBMODULE in $SUBMODULES ; do echo $SUBMODULE ; done | sort | uniq)"
+
+    SUBMODULES_DIR="${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt"
+    mkdir -p "${SUBMODULES_DIR}"
+    for SUBMODULE in ${SUBMODULES} ; do
+        REPO_DIRNAME="$(echo $SUBMODULE | sed 's,^.*/,,')"
+        echo -n "Fetching ${REPO_DIRNAME}: "
+        if [ -d "${SUBMODULES_DIR}/${REPO_DIRNAME}" ] ; then
+            cd "${SUBMODULES_DIR}/${REPO_DIRNAME}"
+            git fetch --all > /dev/null 2>&1
+        else
+            cd "${SUBMODULES_DIR}"
+            git clone --quiet --mirror "${SUBMODULE}" "${REPO_DIRNAME}"
+            cd - >/dev/null
+            cd "${SUBMODULES_DIR}/${REPO_DIRNAME}"
+        fi
+        git log -1 --pretty='tformat:%H'
+        cd - >/dev/null
+    done | tee -a /tmp/git_heads_$BUILD_USER
+}
+mirror_openxt_submodules
 
 # Start the git service if needed
 ps -p `cat /tmp/openxt_git.pid 2>/dev/null` >/dev/null 2>&1 || {
@@ -44,3 +105,42 @@ ps -p `cat /tmp/openxt_git.pid 2>/dev/null` >/dev/null 2>&1 || {
                --export-all
     chmod 666 /tmp/openxt_git.pid
 }
+
+# Populate repo mirror
+mirror_repo_repositories() {
+    cd "${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git"
+    if ! git show "${BRANCH:-master}:layer-conf/${OBJECTIVE}.xml" \
+        >/dev/null 2>/dev/null ; then
+        cd - >/dev/null
+        return
+    fi
+    cd - >/dev/null
+    REPO_MIRROR_DIR="${GIT_ROOT_PATH}/${BUILD_USER}/repo"
+    mkdir -p "${REPO_MIRROR_DIR}"
+    cd "${REPO_MIRROR_DIR}"
+    if [ ! -d .repo ] ; then
+        mkdir -p "${REPO_MIRROR_DIR}/.repo/local_manifests"
+
+        # Process the remotes:
+        # openxt => point to the local git mirror
+        # others => leave unchanged, pointing to upstream
+        ( cd "${GIT_ROOT_PATH}/${BUILD_USER}/openxt.git" ;
+          git show "${BRANCH:-master}:layer-conf/${OBJECTIVE}.remotes.xml" ) |
+        sed -e 's|\(<remote name="openxt" fetch="\)[^"]*\(".*\)|\1git://'"${GIT_LOCALHOST_IP}/${BUILD_USER}"'\2|' \
+            >.repo/local_manifests/"${OBJECTIVE}".remotes.xml
+
+        # Invoke the repo tool from the copy now present in the git mirror
+        ( cd "${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt/git-repo" ;
+          git show "master:repo" ) | python - \
+               init -u "git://${GIT_LOCALHOST_IP}/${BUILD_USER}/openxt.git" \
+                    -m "layer-conf/${OBJECTIVE}.xml" \
+                    ${BRANCH:+-b} ${BRANCH} \
+                    --mirror
+    fi
+
+    # repo sync
+    ( cd "${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt/git-repo" ;
+      git show "master:repo" ) | python - sync
+    cd - >/dev/null
+}
+[ -z "${OBJECTIVE}" ] || mirror_repo_repositories
