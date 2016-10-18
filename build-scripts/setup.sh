@@ -293,15 +293,13 @@ chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/*.layer
 
 # Download the git-repo tool via git submodule.
 # Install it in the home directory of the user.
-if [ ! -e "${BUILD_USER_HOME}/repo" ] ; then
-    if [ ! -e "git-repo/repo" ] ; then
-        git submodule init
-        git submodule update --checkout
-        git submodule update --remote
-    fi
-    cp -f git-repo/repo "${BUILD_USER_HOME}/"
-    chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/repo
+if [ ! -e "git-repo/repo" ] ; then
+    git submodule init
+    git submodule update --checkout
+    git submodule update --remote
 fi
+cp -f git-repo/repo "${BUILD_USER_HOME}/"
+chown ${BUILD_USER}:${BUILD_USER} ${BUILD_USER_HOME}/repo
 
 # Mirror the git-repo repository because the repo tool accesses it.
 if [ ! -d "${GIT_ROOT_PATH}/${BUILD_USER}/submodules/openxt/git-repo.git" ] ; then
