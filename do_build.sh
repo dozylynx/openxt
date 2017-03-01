@@ -57,11 +57,23 @@ do_oe_setup()
             echo 'BBLAYERS =+ "${TOPDIR}/repos/xenclient-oe"' >> conf/bblayers.conf
         fi
 
+        if ! grep meta-openxt-ocaml-platform conf/bblayers.conf >/dev/null; then
+            echo 'BBLAYERS =+ "${TOPDIR}/repos/meta-openxt-ocaml-platform"' >> conf/bblayers.conf
+        fi
+
+        if ! grep meta-openxt-haskell-platform conf/bblayers.conf >/dev/null; then
+            echo 'BBLAYERS =+ "${TOPDIR}/repos/meta-openxt-haskell-platform"' >> conf/bblayers.conf
+        fi
+
         if [ ! -f "local.settings" ]; then
                 cat > local.settings <<EOF
 META_SELINUX_REPO=$META_SELINUX_REPO
 XENCLIENT_REPO=$OPENXT_GIT_PROTOCOL://$OPENXT_GIT_MIRROR/xenclient-oe.git
 XENCLIENT_TAG="$BRANCH"
+OCAML_REPO=$OPENXT_GIT_PROTOCOL://$OPENXT_GIT_MIRROR/meta-openxt-ocaml-platform.git
+OCAML_TAG="$BRANCH"
+HASKELL_REPO=$OPENXT_GIT_PROTOCOL://$OPENXT_GIT_MIRROR/meta-openxt-haskell-platform.git
+HASKELL_TAG="$BRANCH"
 EOF
 
                 if [ "$OE_GIT_MIRROR" ] ; then
